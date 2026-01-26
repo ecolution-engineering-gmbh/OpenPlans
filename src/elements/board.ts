@@ -1,17 +1,17 @@
+import { Polygon, Vector3 } from "../kernel/";
 import * as THREE from 'three';
-import { Vector3D } from '../kernel/dist';
+import { IShape } from "../shapes/base-type";
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import { PolygonShape } from '../shape/polygon-shape';
 
-export interface OPBoard {
-  id?: string;
+export interface BoardOptions {
+  ogid?: string;
   center: {
     x: number;
     y: number;
     z: number;
   };
   color: number;
-  type: 'board';
+  type: 'BOARD';
   coordinates: Array<[number, number, number]>;
   labelName: string;
   dimensions: {
@@ -34,24 +34,25 @@ export interface OPBoard {
 }
 
 // TODO: Use Polygon Shape instead of Polygon Mesh, which will provide us with editing capabilities
-export class Board extends PolygonShape {
-  ogType = 'board';
+export class Board extends Polygon implements IShape {
+  ogType = 'BOARD';
 
-  // Properties that cannot be set externally should be just private, can be accessed at runtime
-  subNodes: Map<string, THREE.Object3D> = new Map();
+  subElements: Map<string, THREE.Object3D> = new Map();
+    
   private labelDivMesh: CSS2DObject | null = null;
 
   // Properties that can be set externally start with an #, provides tight encapsulation and prevents accidental access
-  _selected = false;
+  selected: boolean = false;
+  edit: boolean = false;
 
-  propertySet: OPBoard = {
+  propertySet: BoardOptions = {
     center: {
       x: 0,
       y: 0,
       z: 0,
     },
-    color: 0xcccccc,
-    type: 'board',
+    color: 0xffffff,
+    type: 'BOARD',
     /*
       Anti-clockwise coordinates of the board, starting from top left corner.
       Ends in top right corner.
@@ -80,23 +81,24 @@ export class Board extends PolygonShape {
     }
   };
 
-  set selected(value: boolean) {
-    if (value) {
-      this.outlineColor = 0x4460FF;
-    }
-    else {
-      this.outlineColor = 0x000000;
-    }
-    this._selected = value;
-  }
+  // set selected(value: boolean) {
+  //   if (value) {
+  //     this.outlineColor = 0x4460FF;
+  //   }
+  //   else {
+  //     this.outlineColor = 0x000000;
+  //   }
+  //   this._selected = value;
+  // }
 
-  get selected() {
-    return this._selected;
-  }
+  // get selected() {
+  //   return this._selected;
+  // }
 
   set width(value: number) {
     this.propertySet.dimensions.width = value;
-    this.calculateCoordinatesByConfig();
+
+    this.setOPGeometry();
   }
 
   get width() {
@@ -105,7 +107,8 @@ export class Board extends PolygonShape {
 
   set height(value: number) {
     this.propertySet.dimensions.height = value;
-    this.calculateCoordinatesByConfig();
+
+    this.setOPGeometry();
   }
 
   get height() {
@@ -116,42 +119,44 @@ export class Board extends PolygonShape {
     this.propertySet.dimensions.start.x = value.x;
     this.propertySet.dimensions.start.y = value.y;
 
-    this.calculateCoordinatesByConfig();
+    this.setOPGeometry();
   }
 
   set labelName(value: string) {
     this.propertySet.labelName = value;
+
+    const labelDiv = this.labelDivMesh?.element;
+    if (labelDiv) {
+      labelDiv.textContent = value;
+    }
   }
 
   get labelName() {
     return this.propertySet.labelName;
   }
 
-  set color(value: number) {
-    const material = new THREE.MeshBasicMaterial({
-      color: value,
-    });
-    this.material = material;
+  set boardColor(value: number) {
+    this.propertySet.color = value;
+    this.color = value;
   }
 
-  get color() {
+  get boardColor() {
     return (this.material as THREE.MeshBasicMaterial).color.getHex();
   }
 
-  constructor(boardConfig?: OPBoard) {
-    super();
+  constructor(boardConfig?: BoardOptions) {
+    super({
+      ogid: boardConfig?.ogid,
+      vertices: [],
+      color: 0
+    });
 
     if (boardConfig) {
-      this.setOPConfig(boardConfig);
-    } else {
-      this.propertySet.id = this.ogid;
+      this.propertySet = { ...this.propertySet, ...boardConfig  };
     }
 
-    this.calculateCoordinatesByConfig();
-
-    // If we create XZ plane, the polygon has normals facing downwards, so trick as of now is to create XY plane 
-    // and then rotate it to face upwards
-    this.rotateX(-Math.PI / 2);
+    this.propertySet.ogid = this.ogid;
+    this.setOPGeometry();
     this.createLabelDivMesh();
   }
 
@@ -178,39 +183,44 @@ export class Board extends PolygonShape {
     this.propertySet.center.z = start.z;
     this.propertySet.dimensions.end.x = start.x + width;
     this.propertySet.dimensions.end.y = start.y + height;
-
-    this.setOPGeometry();
   }
 
-  setOPConfig(propertySet: OPBoard) {
+  setOPConfig(propertySet: BoardOptions) {
     this.propertySet = propertySet;
   }
 
-  getOPConfig(): OPBoard {
+  getOPConfig(): BoardOptions {
     return this.propertySet;
   }
 
   setOPGeometry() {
-    this.resetVertices();
+
+    this.calculateCoordinatesByConfig();
+    // If we create XZ plane, the polygon has normals facing downwards, so trick as of now is to create XY plane 
+    // and then rotate it to face upwards
+
     this.outline = false;
 
     const points = [
-      new Vector3D(this.propertySet.coordinates[0][0], this.propertySet.coordinates[0][1], 0),
-      new Vector3D(this.propertySet.coordinates[1][0], this.propertySet.coordinates[1][1], 0),
-      new Vector3D(this.propertySet.coordinates[2][0], this.propertySet.coordinates[2][1], 0),
-      new Vector3D(this.propertySet.coordinates[3][0], this.propertySet.coordinates[3][1], 0),
+      new Vector3(this.propertySet.coordinates[0][0], this.propertySet.coordinates[0][1], 0),
+      new Vector3(this.propertySet.coordinates[1][0], this.propertySet.coordinates[1][1], 0),
+      new Vector3(this.propertySet.coordinates[2][0], this.propertySet.coordinates[2][1], 0),
+      new Vector3(this.propertySet.coordinates[3][0], this.propertySet.coordinates[3][1], 0),
     ];
-    this.addVertices(points);
+    
+    this.setConfig({
+      vertices: points,
+      color: this.propertySet.color
+    });
 
-    // this.getBrepData();
-    this.setOPMaterial();
+    this.rotation.x = -Math.PI / 2; // Rotate to face the camera
+    this.position.y = -0.01;
+
     this.outline = true;
 
-    this.labelDivMesh?.position.set(
-      this.propertySet.dimensions.start.x,
-      this.propertySet.dimensions.start.y,
-      this.propertySet.dimensions.start.z
-    );
+    if (this.labelDivMesh) {
+      this.setLabelPosition();
+    }
   }
 
   dispose() {
@@ -218,15 +228,12 @@ export class Board extends PolygonShape {
     this.labelDivMesh?.element.remove();
     this.labelDivMesh = null;
     this.clear();
-    this.subNodes.clear();
+    this.subElements.clear();
     this.removeFromParent();
   }
 
   setOPMaterial() {
-    const material = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-    });
-    this.material = material;
+    // this.color = this.propertySet.color;
   }
 
   private createLabelDivMesh() {
@@ -237,30 +244,27 @@ export class Board extends PolygonShape {
     this.labelDivMesh = new CSS2DObject(labelDiv);
     this.add(this.labelDivMesh);
 
+    this.setLabelPosition();
+
     setTimeout(() => {
-      this.setLabelPosition();
+      const width = labelDiv.clientWidth;
+      const newWidth = width + width + 10;
+
+      labelDiv.style.width = `${newWidth}px`;
+      labelDiv.style.textAlign = 'right';
+
+      const height = labelDiv.clientHeight;
+      const newHeight = height + height + 10;
+
+      labelDiv.style.height = `${newHeight}px`;
     }, 100);
   }
 
-  private setLabelPosition() {
-    const labelDiv = this.labelDivMesh?.element;
-    if (!labelDiv) return;
-
-    const width = labelDiv.clientWidth;
-    const newWidth = width + width + 10;
-
-    labelDiv.style.width = `${newWidth}px`;
-    labelDiv.style.textAlign = 'right';
-
-    const height = labelDiv.clientHeight;
-    const newHeight = height + height + 10;
-
-    labelDiv.style.height = `${newHeight}px`;
-    
+  private setLabelPosition() {    
     this.labelDivMesh?.position.set(
       this.propertySet.dimensions.start.x,
       this.propertySet.dimensions.start.y,
-      0
+      this.propertySet.dimensions.start.z
     );
   }
 }
